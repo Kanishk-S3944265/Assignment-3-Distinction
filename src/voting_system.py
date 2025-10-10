@@ -15,15 +15,13 @@ class VotingSystem:
         """Registers a new voter."""
         self.db.add_voter(username, password)
         print(f"[+] Voter '{username}' registered successfully.")
-
+        
     def login(self, username, password):
-        """Logs in the voter and returns a new session ID."""
-        voter = self.db.get_voter(username)
-        if voter and voter["password"] == password:
-            session_id = str(uuid.uuid4())
-            self.sessions[session_id] = username
-            print(f"[+] Login successful for '{username}'. Session ID: {session_id}")
-            return session_id
+        if self.db.verify_password(username, password):
+         session_id = str(uuid.uuid4())
+         self.sessions[session_id] = username
+         print(f"[+] Login successful for '{username}'. Session ID: {session_id}")
+         return session_id
         else:
             print("[!] Invalid username or password.")
             return None

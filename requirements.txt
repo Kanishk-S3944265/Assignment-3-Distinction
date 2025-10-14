@@ -1,0 +1,3 @@
+pip install PyJWT
+PyJWT==2.9.0 
+# The above line specifies the version of PyJWT to ensure compatibility.

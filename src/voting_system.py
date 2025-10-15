@@ -4,7 +4,7 @@ import os
 import secrets
 from src.database import Database
 
-# Generate/read signing key and print a masked preview 
+# Generate/read signing key 
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", secrets.token_hex(32))
 print(f"[DEBUG] JWT secret key (masked): {SECRET_KEY[:6]}...{SECRET_KEY[-6:]}")
 
@@ -12,13 +12,21 @@ class VotingSystem:
     """Voting system that supports password hashing, optional MFA, and JWT sessions."""
 
     def __init__(self, db):
-        """Accept a Database instance for persistence."""
+        """Accept a Database instance """
         self.db = db
+
+    def _audit(self, event: str, **kv):
+        """Append an audit log line with timestamp and key=value pairs."""
+        ts = datetime.datetime.utcnow().isoformat() + "Z"
+        line = ts + " event=" + event + " " + " ".join(f"{k}={v}" for k, v in kv.items())
+        with open("audit.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
     def register_voter(self, username, password):
         """Register a voter using salted, hashed password storage."""
         self.db.add_voter(username, password)
         print(f"[+] Voter '{username}' registered successfully.")
+        self._audit("register_success", user=username)
 
     def login(self, username, password, mfa_code: str | None = None):
         """
@@ -28,8 +36,10 @@ class VotingSystem:
         voter = self.db.get_voter(username)
         if voter and self.db.verify_password(username, password):
             if self.db.mfa_enabled(username):
+                self._audit("mfa_required", user=username)
                 if not mfa_code or not self.db.verify_mfa(username, mfa_code):
                     print("[-] MFA verification failed or missing.")
+                    self._audit("mfa_failure", user=username)
                     return None
 
             payload = {
@@ -39,11 +49,12 @@ class VotingSystem:
             }
             token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
             print(f"[+] Login successful for '{username}'. JWT issued.")
-            # Keep the exact masked line style you wanted
             print("[DEBUG] JWT (masked): ***")
+            self._audit("login_success", user=username)
             return token
 
         print("[-] Invalid username or password.")
+        self._audit("login_failure", user=username)
         return None
 
     def verify_token(self, token):
@@ -63,8 +74,10 @@ class VotingSystem:
         if username:
             self.db.add_vote(username, candidate)
             print(f"[+] Vote submitted by '{username}' for candidate '{candidate}'.")
+            self._audit("vote_success", user=username, candidate=candidate)
             return True
         print("[-] Vote failed. Invalid or expired session.")
+        self._audit("vote_failure", candidate=candidate)
         return False
 
     def show_results(self):
@@ -73,12 +86,16 @@ class VotingSystem:
         print("\nVoting Results:")
         for candidate, count in results.items():
             print(f"  - {candidate}: {count} vote(s)")
+        self._audit("results_viewed", total_candidates=len(results))
 
     def show_results_secure(self, token):
         """Print results only if the caller is an admin (RBAC check)."""
         user = self.verify_token(token)
         if not user or not self.db.has_role(user, "admin"):
             print("[-] Forbidden: admin only.")
+            self._audit("results_forbidden", user=(user or "unknown"))
             return
+        self._audit("results_viewed_admin", user=user)
         self.show_results()
+
 

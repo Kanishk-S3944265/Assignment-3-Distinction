@@ -30,3 +30,36 @@ Type help to see commands:
 
 register, enable_mfa, login, vote, results, results_admin, setrole, whoami, logout, exit
 
+Typical flow:
+
+register alice → prints salt+hash
+
+enable_mfa alice → prints current 6-digit TOTP (for demo)
+
+login alice → enter password + the printed TOTP
+
+register bob → (optional)
+
+login bob` → (no MFA unless enabled)
+
+vote as alice and bob
+
+results → open tally
+
+setrole bob → admin
+
+results_admin (as bob) → RBAC-gated tally
+
+
+Security notes (prototype):
+
+Passwords are never stored in plaintext (PBKDF2-HMAC + per-user salt).
+
+JWTs expire after 5 minutes; refresh is out-of-scope for the prototype.
+
+MFA secrets are per-user; TOTP codes change every ~30s.
+
+Rate limit is in-memory and per-process (sufficient for a single-process demo).
+
+CLI prints demo-friendly details (salt/hash, masked JWT secret, masked JWT).
+

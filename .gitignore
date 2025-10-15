@@ -1,3 +1,5 @@
+# audit log (generated at runtime)
+audit.log
 __pycache__/
 *.pyc
 *.pyo

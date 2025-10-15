@@ -28,7 +28,7 @@ jobs:
       run: |
         python -m tests.test_voting_system
 
-        - name: Install dependencies
+        
      
     
 

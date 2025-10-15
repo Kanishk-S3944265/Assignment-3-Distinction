@@ -2,25 +2,22 @@ from src.database import Database
 from src.voting_system import VotingSystem
 
 def main():
+    print("\n--- JWT Secure Voting System ---")
     db = Database()
     system = VotingSystem(db)
 
-    print("\n--- Online Voting System ---")
-    # 1. Register voters
-    system.register_voter("alice", "1234")
-    system.register_voter("bob", "5678")
+    system.register_voter("alice", "password123")
+    system.register_voter("bob", "secure456")
 
-    # 2. Login and get session IDs
-    session_alice = system.login("alice", "1234")
-    session_bob = system.login("bob", "5678")
+    token_alice = system.login("alice", "password123")
+    token_bob   = system.login("bob", "secure456")
 
-    # 3. Submit votes
-    system.submit_vote(session_alice, "Candidate A")
-    system.submit_vote(session_bob, "Candidate B")
-    system.submit_vote(session_alice, "Candidate A")  # Alice votes twice for demo
+    if token_alice: system.submit_vote(token_alice, "Candidate A")
+    if token_bob:   system.submit_vote(token_bob, "Candidate B")
+    if token_alice: system.submit_vote(token_alice, "Candidate A")
 
-    # 4. Display results
     system.show_results()
 
 if __name__ == "__main__":
     main()
+

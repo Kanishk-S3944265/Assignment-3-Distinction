@@ -1,4 +1,8 @@
 __pycache__/
 *.pyc
+*.bak
 .DS_Store
-audit.log
+web/
+audit.log # audit log (generated at runtime)
+.venv/
+env/

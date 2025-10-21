@@ -32,13 +32,21 @@ def main():
                 )
 
             elif cmd == "register":
-                """Create a new voter with a hashed password."""
+                first = input("first name: ").strip()
+                last = input("last name: ").strip()
+                dob = input("date of birth (YYYY-MM-DD): ").strip()
+                address = input("address: ").strip()
                 username = input("username: ").strip()
                 password = getpass.getpass("password: ")
                 try:
-                    app.register_voter(username, password)
+                    app.register_voter(
+                        username, password,
+                        first_name=first, last_name=last, dob=dob, address=address
+                    )
                 except ValueError as e:
                     print(f"[-] {e}")
+                    
+    
 
             elif cmd == "enable_mfa":
                 """Enable TOTP MFA for an existing user and print the current code."""

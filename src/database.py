@@ -1,96 +1,102 @@
-import hashlib
-import os
-import pyotp
+import hashlib, os, hmac, time
+from typing import Optional
 
 class Database:
-    """In-memory storage for voters and votes with password hashing and MFA data."""
+    """
+    In-memory DB: voters + votes.
+    - Passwords stored as PBKDF2-HMAC(SHA-256) with per-user random salt.
+    - Voter profile includes first_name, last_name, dob, address.
+    - Optional MFA secret + simple role.
+    """
 
     def __init__(self):
-        """Initialise in-memory voter and vote stores."""
-        self.voters = {}  # {username: {"salt": bytes, "password": bytes, "mfa_secret": str|None, "role": str}}
-        self.votes = []   # [{"user": str, "candidate": str}]
+        self.voters = {}   # username -> {...}
+        self.votes = []    # {"user": "...", "candidate": "..."}
+        # rate-limit store: username -> [(ts1, ts2, ...)]
+        self.login_attempts = {}
 
-    def hash_password(self, password, salt=None):
-        """Return (salt, hashed) using PBKDF2-HMAC-SHA256."""
+    # --- password hashing ---
+    def hash_password(self, password: str, salt: Optional[bytes] = None):
         if not salt:
             salt = os.urandom(16)
-        hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+            print(f"[DEBUG] Created salt: {salt.hex()}")
+        hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100_000)
+        print(f"[DEBUG] Hashed password: {hashed.hex()}")
         return salt, hashed
 
-    def add_voter(self, username, password, role="voter"):
-        """Create a voter with salted, hashed password and optional role."""
+    def add_voter(self, username: str, password: str, *, first_name: str, last_name: str, dob: str, address: str):
         if username in self.voters:
             raise ValueError("Voter already registered.")
         salt, hashed_pw = self.hash_password(password)
-        # Always show for demo
-        print(f"[DEBUG] Created salt for {username}: {salt.hex()}")
-        print(f"[DEBUG] Hashed password for {username}: {hashed_pw.hex()}")
         self.voters[username] = {
             "salt": salt,
             "password": hashed_pw,
+            "first_name": first_name.strip(),
+            "last_name": last_name.strip(),
+            "dob": dob.strip(),          # store as string; can validate format upstream
+            "address": address.strip(),
             "mfa_secret": None,
-            "role": role
+            "role": "voter"
         }
 
-    def verify_password(self, username, password):
-        """Return True if provided password matches stored hash for the user."""
+    def verify_password(self, username: str, password: str) -> bool:
         voter = self.voters.get(username)
         if not voter:
             return False
         salt = voter["salt"]
         _, hashed_input = self.hash_password(password, salt)
-        return hashed_input == voter["password"]
+        return hmac.compare_digest(hashed_input, voter["password"])
 
-    # ---------- MFA ----------
-    def enable_mfa(self, username) -> str:
-        """Create and store a per-user TOTP secret; return the secret."""
-        voter = self.voters.get(username)
-        if not voter:
-            raise ValueError("User not found")
-        if voter.get("mfa_secret"):
-            return voter["mfa_secret"]
-        secret = pyotp.random_base32()
-        voter["mfa_secret"] = secret
-        return secret
-
-    def mfa_enabled(self, username) -> bool:
-        """Return True if the user has MFA configured."""
-        voter = self.voters.get(username)
-        return bool(voter and voter.get("mfa_secret"))
-
-    def verify_mfa(self, username, code: str) -> bool:
-        """Return True if the provided 6-digit TOTP code is valid for the user."""
-        voter = self.voters.get(username)
-        if not voter or not voter.get("mfa_secret"):
-            return False
-        totp = pyotp.TOTP(voter["mfa_secret"])
-        return bool(totp.verify(code, valid_window=1))  # small skew allowed
-
-    # ---------- Roles / RBAC ----------
-    def has_role(self, username, role) -> bool:
-        """Return True if the user has the specified role (e.g., 'admin')."""
-        voter = self.voters.get(username)
-        return bool(voter and voter.get("role") == role)
-
-    def set_role(self, username, role: str) -> None:
-        """Set the role for an existing user."""
-        voter = self.voters.get(username)
-        if not voter:
-            raise ValueError("User not found")
-        voter["role"] = role
-
-    # ---------- Voting ----------
-    def get_voter(self, username):
-        """Return the voter record dict for a username, or None."""
+    def get_voter(self, username: str):
         return self.voters.get(username)
 
-    def add_vote(self, username, candidate):
-        """Append a vote record for the given user and candidate."""
+    def set_role(self, username: str, role: str):
+        if username not in self.voters:
+            raise ValueError("User not found.")
+        if role not in ("admin", "voter"):
+            raise ValueError("Role must be 'admin' or 'voter'.")
+        self.voters[username]["role"] = role
+
+    def has_role(self, username: str, role: str) -> bool:
+        v = self.voters.get(username)
+        return bool(v and v.get("role") == role)
+
+    # --- MFA (TOTP) helpers ---
+    def enable_mfa(self, username: str):
+        if username not in self.voters:
+            raise ValueError("User not found.")
+        try:
+            import pyotp
+        except ImportError:
+            raise ValueError("pyotp not installed. Add 'pyotp' to requirements.txt")
+        secret = pyotp.random_base32()
+        self.voters[username]["mfa_secret"] = secret
+        return secret
+
+    def mfa_enabled(self, username: str) -> bool:
+        v = self.voters.get(username)
+        return bool(v and v.get("mfa_secret"))
+
+    def verify_mfa(self, username: str, code: str) -> bool:
+        v = self.voters.get(username)
+        if not v or not v.get("mfa_secret"):
+            return False
+        try:
+            import pyotp
+        except ImportError:
+            return False
+        totp = pyotp.TOTP(v["mfa_secret"])
+        try:
+            return bool(totp.verify(code, valid_window=1))
+        except Exception:
+            return False
+
+    # --- votes ---
+    def add_vote(self, username: str, candidate: str):
         self.votes.append({"user": username, "candidate": candidate})
 
     def get_results(self):
-        """Return a dict of candidate -> vote count."""
-        results = {}
+        out = {}
         for v in self.votes:
-            results[v["candidate"]] = results.get(v["candidate"], 0) + 1
-        return results
+            out[v["candidate"]] = out.get(v["candidate"], 0) + 1
+        return out

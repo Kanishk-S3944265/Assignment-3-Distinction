@@ -2,4 +2,7 @@ PyJWT==2.9.0
 pytest==8.3.3
 pyotp==2.9.0
 
-# The above line specifies the version of PyJWT to ensure compatibility.
+# The above line specifies the version of PyJWT to ensure compatibility.Flask==3.0.3
+Flask-WTF==1.2.1
+Flask==3.0.3
+Flask-WTF==1.2.1

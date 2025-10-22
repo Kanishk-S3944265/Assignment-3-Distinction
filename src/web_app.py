@@ -1,16 +1,31 @@
 # --- Electronic Voting Platform (Enhanced Web UI) ---
 from flask import (
     Flask, request, redirect, make_response, render_template_string,
-    url_for, flash, send_file
+    url_for, flash
 )
 from markupsafe import escape
-import os, html
+import os, time
+from functools import wraps
+
+# CSRF
+from flask_wtf.csrf import CSRFProtect, generate_csrf, CSRFError
+
 from src.database import Database
 from src.voting_system import VotingSystem
 
 # -------------------- App setup --------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-flask-secret")
+
+# Dev-safe cookie/CSRF settings (use stricter in prod)
+app.config.update(
+    SESSION_COOKIE_SECURE=False,      # allow http:// in dev
+    SESSION_COOKIE_SAMESITE="Lax",
+    WTF_CSRF_TIME_LIMIT=None          # no timeout for demo
+)
+
+# Enable CSRF globally
+CSRFProtect(app)
 
 db = Database()
 vs = VotingSystem(db)
@@ -23,90 +38,26 @@ BASE = """<!doctype html>
 <title>Electronic Voting Platform</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  :root{
-    --bg1:#2563eb;   /* blue-600 */
-    --bg2:#0ea5e9;   /* cyan-500 */
-    --ink:#0f172a;   /* slate-900 */
-    --white:#ffffff;
-    --muted:#64748b; /* slate-500 */
-    --accent:#0ea5e9;/* cyan-500 */
-    --accent-dark:#0b83bb;
-  }
+  :root{ --bg1:#2563eb; --bg2:#0ea5e9; --ink:#0f172a; --white:#ffffff; --muted:#64748b; --accent:#0ea5e9; --accent-dark:#0b83bb; }
   *{box-sizing:border-box}
-  body {
-    margin: 0;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    background: linear-gradient(120deg,var(--bg1),var(--bg2));
-    color: var(--ink);
-  }
+  body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: linear-gradient(120deg,var(--bg1),var(--bg2)); color: var(--ink); }
   .wrap { max-width: 1100px; margin: 40px auto; padding: 0 16px; }
-
-  /* Top nav */
-  nav {
-    display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px;
-  }
-  nav a {
-    display:inline-block; padding:8px 12px;
-    color:#fff; background:rgba(255,255,255,.20);
-    border-radius:10px; text-decoration:none; font-weight:600;
-    backdrop-filter:saturate(130%) blur(2px);
-  }
+  nav { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  nav a { display:inline-block; padding:8px 12px; color:#fff; background:rgba(255,255,255,.20); border-radius:10px; text-decoration:none; font-weight:600; backdrop-filter:saturate(130%) blur(2px); }
   nav a.active { background:rgba(255,255,255,.35); }
   nav a:hover { background:rgba(255,255,255,.45); }
-
-  .card {
-    background: #fff; border-radius: 18px; padding: 24px;
-    box-shadow: 0 10px 25px rgba(0,0,0,.15);
-  }
-
-  /* hero section (AEC-style) */
-  .hero {
-    background: linear-gradient(90deg,#eef6ff,#f7fbff);
-    border-radius: 18px;
-    box-shadow: 0 10px 25px rgba(0,0,0,.12);
-    overflow:hidden;
-  }
-  .hero-grid{
-    display:grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 28px;
-    padding: 40px 32px;
-  }
-  @media (max-width: 840px){
-    .hero-grid{ grid-template-columns:1fr; padding:28px 20px; }
-  }
-  .hero h2{
-    margin:0 0 10px 0; font-size: 2.2rem; color:#0b2a55;
-  }
-  .hero p{
-    margin:0 0 22px 0; color: var(--muted); font-size:1.1rem; line-height:1.5;
-  }
-  .cta {
-    display:inline-flex; align-items:center; gap:10px;
-    background: var(--accent); color:var(--white);
-    border:0; border-radius:10px; padding:12px 18px;
-    font-weight:700; cursor:pointer; text-decoration:none;
-    transition: transform .06s ease, background .2s ease;
-    box-shadow: 0 6px 18px rgba(14,165,233,.35);
-  }
-  .cta:hover{ background: var(--accent-dark); transform: translateY(-1px); }
-  .cta:active{ transform: translateY(0); }
-  .hero-art{
-    background: radial-gradient(1200px 400px at 60% -200px, rgba(37,99,235,.2), transparent 55%),
-                radial-gradient(600px 220px at 100% 100%, rgba(14,165,233,.18), transparent 60%);
-    border-radius: 14px;
-    min-height: 260px;
-    display:flex; align-items:center; justify-content:center;
-  }
-  .hero-card{
-    background:#fff; border:1px solid #e2e8f0;
-    border-radius:12px; padding:16px 18px; width:min(420px, 92%);
-    box-shadow: 0 12px 30px rgba(0,0,0,.10);
-  }
+  .card { background:#fff; border-radius:18px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,.15); }
+  .hero { background: linear-gradient(90deg,#eef6ff,#f7fbff); border-radius:18px; box-shadow:0 10px 25px rgba(0,0,0,.12); overflow:hidden; }
+  .hero-grid{ display:grid; grid-template-columns:1.1fr 0.9fr; gap:28px; padding:40px 32px; }
+  @media (max-width: 840px){ .hero-grid{ grid-template-columns:1fr; padding:28px 20px; } }
+  .hero h2{ margin:0 0 10px 0; font-size:2.2rem; color:#0b2a55; }
+  .hero p{ margin:0 0 22px 0; color:var(--muted); font-size:1.1rem; line-height:1.5; }
+  .cta { display:inline-flex; align-items:center; gap:10px; background:var(--accent); color:#fff; border:0; border-radius:10px; padding:12px 18px; font-weight:700; text-decoration:none; cursor:pointer; transition:transform .06s ease, background .2s ease; box-shadow:0 6px 18px rgba(14,165,233,.35); }
+  .cta:hover{ background:var(--accent-dark); transform: translateY(-1px); }
+  .hero-art{ background: radial-gradient(1200px 400px at 60% -200px, rgba(37,99,235,.2), transparent 55%), radial-gradient(600px 220px at 100% 100%, rgba(14,165,233,.18), transparent 60%); border-radius:14px; min-height:260px; display:flex; align-items:center; justify-content:center; }
+  .hero-card{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; width:min(420px,92%); box-shadow:0 12px 30px rgba(0,0,0,.10); }
   .hero-card h3{ margin:0 0 8px 0; font-size:1.1rem; color:#0b2a55; }
   .hero-card ul{ margin:0; padding-left:18px; color:#334155; }
-  .hero-card li{ margin:6px 0; }
-
   .msg-ok { background:#dcfce7; color:#166534; padding:10px; border-radius:8px; }
   .msg-bad { background:#fee2e2; color:#7f1d1d; padding:10px; border-radius:8px; }
   input,button { padding:8px 10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:4px; width:100%; }
@@ -141,33 +92,90 @@ BASE = """<!doctype html>
 </body></html>"""
 
 # -------------------- Helpers --------------------
-def _render(title, body, active=""): 
-    return render_template_string(BASE, title=title, body=body, active=active)
+# --- Brute-force protection for /login ---
+LOGIN_WINDOW_SECONDS = 5 * 60      # 5 minutes window
+LOGIN_MAX_FAILS = 3                 # 3 wrong tries allowed in the window
+LOGIN_LOCK_SECONDS = 10 * 60        # lock for 10 minutes
+
+_login_tracker = {}  # key -> {'fails': [ts,...], 'lock_until': ts}
+
+def _bf_key(username, ip):
+    u = (username or "").strip().lower()
+    i = (ip or "").strip()
+    return f"{u}|{i}"
+
+def _bf_is_locked(username, ip):
+    now = time.time()
+    k = _bf_key(username, ip)
+    data = _login_tracker.get(k)
+    if not data:
+        return 0
+    lock_until = data.get("lock_until", 0)
+    if lock_until and lock_until > now:
+        return int(lock_until - now)
+    return 0
+
+def _bf_register_failure(username, ip):
+    now = time.time()
+    k = _bf_key(username, ip)
+    data = _login_tracker.setdefault(k, {"fails": [], "lock_until": 0})
+    # prune old failures outside window
+    data["fails"] = [t for t in data["fails"] if now - t <= LOGIN_WINDOW_SECONDS]
+    data["fails"].append(now)
+    if len(data["fails"]) >= LOGIN_MAX_FAILS:
+        data["lock_until"] = now + LOGIN_LOCK_SECONDS
+        data["fails"].clear()
+        return True  # just locked
+    return False
+
+def _bf_reset(username, ip):
+    k = _bf_key(username, ip)
+    if k in _login_tracker:
+        del _login_tracker[k]
+
+def _render(title, body, active=""):
+    # Pre-render body so {{ ... }} like CSRF get evaluated
+    rendered_body = render_template_string(body)
+    return render_template_string(BASE, title=title, body=rendered_body, active=active)
 
 def _get_user_and_token():
     t = request.cookies.get("jwt")
     return (vs.verify_token(t) if t else None, t)
 
+def require_role(role):
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            user, _ = _get_user_and_token()
+            if not user or not db.has_role(user, role):
+                flash("Forbidden: insufficient privileges.", "bad")
+                return redirect(url_for("login"))
+            return fn(*args, **kwargs)
+        return wrapper
+    return deco
+
+@app.after_request
+def no_store(resp):
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
 # -------------------- Routes --------------------
 @app.route("/")
 def home():
-    # AEC-like hero with a single CTA to /register
     body = f"""
     <section class="hero">
       <div class="hero-grid">
         <div>
           <h2>Enrol to vote</h2>
-          <p>To participate in secure online elections and mock referendums, start your enrolment now.
-             It only takes a moment and helps us verify you before you cast your ballot.</p>
-          <a class="cta" href="{url_for('register')}">Start enrolment →
-          </a>
+          <p>To participate in secure online elections and mock referendums, start your enrolment now.</p>
+          <a class="cta" href="{url_for('register')}">Start enrolment →</a>
         </div>
         <div class="hero-art">
           <div class="hero-card">
             <h3>What you'll need</h3>
             <ul>
-              <li>Basic details (first &amp; last name, DOB, address)</li>
-              <li>A username &amp; strong password</li>
+              <li>First &amp; last name, DOB, address</li>
+              <li>Username &amp; strong password</li>
               <li>(Optional) Enable MFA after enrolment</li>
             </ul>
           </div>
@@ -180,7 +188,9 @@ def home():
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method=="GET":
-        body = """<form method='post'>
+        token = generate_csrf()
+        body = f"""<form method='post'>
+        <input type="hidden" name="csrf_token" value="{token}">
         <p><input name='first_name' placeholder='First name' required></p>
         <p><input name='last_name' placeholder='Last name' required></p>
         <p><input name='dob' placeholder='DOB (YYYY-MM-DD)' required></p>
@@ -204,20 +214,38 @@ def register():
 @app.route("/login", methods=["GET","POST"])
 def login():
     if request.method=="GET":
-        body = """<form method='post'>
+        token = generate_csrf()
+        body = f"""<form method='post'>
+        <input type="hidden" name="csrf_token" value="{token}">
         <p><input name='username' placeholder='Username' required></p>
         <p><input type='password' name='password' placeholder='Password' required></p>
         <p><input name='mfa_code' placeholder='MFA code (if enabled)'></p>
         <p><button>Login</button></p></form>"""
         return _render("Login", body, "login")
+    # --- brute-force check before verifying password ---
+    username_raw = request.form.get("username","")
+    username = username_raw.strip()
+    ip = request.remote_addr
+
+    locked_for = _bf_is_locked(username, ip)
+    if locked_for:
+        mins = max(1, locked_for // 60)
+        flash(f"Account temporarily locked due to multiple failed logins. Try again in {mins} minute(s).", "bad")
+        return redirect("/login")
+
     token = vs.login(
         request.form.get("username","").strip(),
         request.form.get("password",""),
         mfa_code=(request.form.get("mfa_code") or None)
     )
     if not token:
-        flash("Login failed (rate-limited, bad credentials, or MFA missing).","bad")
+        just_locked = _bf_register_failure(username, ip)
+        if just_locked:
+            flash("Too many failed attempts. Account locked for 10 minutes.", "bad")
+        else:
+            flash("Login failed (bad credentials or MFA missing).", "bad")
         return redirect("/login")
+    _bf_reset(username, ip)
     resp = make_response(redirect("/vote"))
     resp.set_cookie("jwt", token, httponly=True, samesite="Lax")
     flash("Signed in successfully.","ok")
@@ -230,7 +258,8 @@ def vote():
         flash("Please login first.","bad")
         return redirect("/login")
     if request.method=="GET":
-        body = f"<p>Signed in as <b>{escape(user)}</b></p><form method='post'><p><input name='candidate' placeholder='Candidate' required></p><p><button>Submit Vote</button></p></form>"
+        csrf = generate_csrf()
+        body = f"<p>Signed in as <b>{escape(user)}</b></p><form method='post'><input type='hidden' name='csrf_token' value='{csrf}'><p><input name='candidate' placeholder='Candidate' required></p><p><button>Submit Vote</button></p></form>"
         return _render("Vote", body, "vote")
     ok = vs.submit_vote(token, request.form.get("candidate",""))
     flash("Vote recorded." if ok else "Vote failed (expired/invalid token).","ok" if ok else "bad")
@@ -276,7 +305,10 @@ def security():
             except Exception as e:
                 flash(f"Error: {escape(str(e))}","bad")
         return redirect("/security")
-    body=f"<p>Signed in as {escape(user)}</p><form method='post'><input type='hidden' name='action' value='enable_mfa'><button>Enable MFA</button></form><form method='post'><input type='hidden' name='action' value='set_role'><p><input name='role' placeholder='admin | voter'></p><p><button>Update Role</button></p></form>"
+    csrf = generate_csrf()
+    body=f"<p>Signed in as {escape(user)}</p>" \
+         f"<form method='post'><input type='hidden' name='csrf_token' value='{csrf}'><input type='hidden' name='action' value='enable_mfa'><button>Enable MFA</button></form>" \
+         f"<form method='post' style='margin-top:10px;'><input type='hidden' name='csrf_token' value='{csrf}'><input type='hidden' name='action' value='set_role'><p><input name='role' placeholder='admin | voter'></p><p><button>Update Role</button></p></form>"
     return _render("Security", body, "security")
 
 @app.route("/audit")
@@ -287,7 +319,12 @@ def audit():
     body=f"<p>Last 200 audit lines:</p><pre>{escape(''.join(lines))}</pre>"
     return _render("Audit Log", body, "audit")
 
+# ---- Errors ----
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    flash(f"CSRF failed: {e.description}", "bad")
+    return redirect(request.referrer or url_for("home"))
+
 # -------------------- Run --------------------
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-

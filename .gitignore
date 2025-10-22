@@ -6,3 +6,4 @@ web/
 audit.log # audit log (generated at runtime)
 .venv/
 env/
+audit.log

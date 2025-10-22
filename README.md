@@ -8,11 +8,11 @@ Features (implemented):
 
 - Authentication: JWT (HS256) with 5-minute expiry.
 
-- MFA: TOTP (time-based one-time codes) via pyotp (per-user secret).
+- MFA (Multi Factor Authentication): TOTP (time-based one-time codes) via pyotp (per-user secret).
 
 - RBAC hooks: user roles (voter, admin) + admin-only results method.
 
-- Audit logging: append-only audit.log (UTC ISO timestamp + key=value).
+- Audit logging (To keep track of whatever has done): append-only audit.log (UTC ISO timestamp + key=value).
 
 - Rate limiting (login): blocks after 5 failed attempts within 10 minutes (rolling window).
 

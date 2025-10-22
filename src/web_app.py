@@ -4,7 +4,7 @@ from flask import (
     url_for, flash
 )
 from markupsafe import escape
-import os
+import os, time
 from functools import wraps
 
 # CSRF
@@ -140,6 +140,47 @@ window.addEventListener('DOMContentLoaded', ()=>{
 </body></html>"""
 
 # -------------------- Helpers --------------------
+# --- Brute-force protection for /login ---
+LOGIN_WINDOW_SECONDS = 5 * 60      # 5 minutes window
+LOGIN_MAX_FAILS = 3                 # 3 wrong tries allowed in the window
+LOGIN_LOCK_SECONDS = 10 * 60        # lock for 10 minutes
+
+_login_tracker = {}  # key -> {'fails': [ts,...], 'lock_until': ts}
+
+def _bf_key(username, ip):
+    u = (username or "").strip().lower()
+    i = (ip or "").strip()
+    return f"{u}|{i}"
+
+def _bf_is_locked(username, ip):
+    now = time.time()
+    k = _bf_key(username, ip)
+    data = _login_tracker.get(k)
+    if not data:
+        return 0
+    lock_until = data.get("lock_until", 0)
+    if lock_until and lock_until > now:
+        return int(lock_until - now)
+    return 0
+
+def _bf_register_failure(username, ip):
+    now = time.time()
+    k = _bf_key(username, ip)
+    data = _login_tracker.setdefault(k, {"fails": [], "lock_until": 0})
+    # prune old failures outside window
+    data["fails"] = [t for t in data["fails"] if now - t <= LOGIN_WINDOW_SECONDS]
+    data["fails"].append(now)
+    if len(data["fails"]) >= LOGIN_MAX_FAILS:
+        data["lock_until"] = now + LOGIN_LOCK_SECONDS
+        data["fails"].clear()
+        return True  # just locked
+    return False
+
+def _bf_reset(username, ip):
+    k = _bf_key(username, ip)
+    if k in _login_tracker:
+        del _login_tracker[k]
+
 def _render(title, body, active=""):
     # figure out current user for top-right status
     t = request.cookies.get("jwt")
@@ -234,14 +275,30 @@ def login():
         <p><input name='mfa_code' placeholder='MFA code (if enabled)'></p>
         <p><button>Login</button></p></form>"""
         return _render("Login", body, "login")
+    # --- brute-force check before verifying password ---
+    username_raw = request.form.get("username","")
+    username = username_raw.strip()
+    ip = request.remote_addr
+
+    locked_for = _bf_is_locked(username, ip)
+    if locked_for:
+        mins = max(1, locked_for // 60)
+        flash(f"Account temporarily locked due to multiple failed logins. Try again in {mins} minute(s).", "bad")
+        return redirect("/login")
+
     token_val = vs.login(
         request.form.get("username","").strip(),
         request.form.get("password",""),
         mfa_code=(request.form.get("mfa_code") or None)
     )
     if not token_val:
-        flash("Login failed (bad credentials or MFA missing).","bad")
+        just_locked = _bf_register_failure(username, ip)
+        if just_locked:
+            flash("Too many failed attempts. Account locked for 10 minutes.", "bad")
+        else:
+            flash("Login failed (bad credentials or MFA missing).", "bad")
         return redirect("/login")
+    _bf_reset(username, ip)
     resp = make_response(redirect("/vote"))
     resp.set_cookie("jwt", token_val, httponly=True, samesite="Lax")
     flash("Signed in successfully.","ok")

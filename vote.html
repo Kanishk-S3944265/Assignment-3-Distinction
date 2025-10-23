@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <section class="card-hero">
+    <div class="hero-title">Cast your vote</div>
+    <div class="hero-sub">
+      Authenticated with short-lived JWT. Submissions are audited and rate-limited logins protect accounts.
+    </div>
+    <ul class="hero-points">
+      <li>• JWT (5-minute expiry) stored in HttpOnly cookie</li>
+      <li>• Audit logs for vote & auth events</li>
+      <li>• Enable TOTP MFA to add a second factor</li>
+      <li>• RBAC controls for admin results</li>
+    </ul>
+  </section>
+
+  <section class="card-form">
+    {% if user %}
+      <h2>Welcome, {{ user }}</h2>
+
+      <form method="post" style="margin-top:1rem">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label>Candidate</label>
+          <input name="candidate" required maxlength="64" placeholder="e.g. Candidate A">
+        </div>
+        <button type="submit">Submit Vote</button>
+      </form>
+
+      <div class="row" style="margin-top:1.25rem">
+        <div>
+          <h3>Account security</h3>
+          <form method="post" action="{{ url_for('enable_mfa') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Enable MFA (TOTP)</button>
+          </form>
+          <p class="subtle">Use an authenticator app to generate 6-digit codes.</p>
+        </div>
+
+        <div>
+          <h3>Role (RBAC demo)</h3>
+          <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+              <label>Set my role</label>
+              <input name="role" placeholder="admin or voter" required>
+            </div>
+            <button type="submit">Update Role</button>
+          </form>
+          <p class="subtle">Admins can view the restricted results page.</p>
+        </div>
+      </div>
+
+    {% else %}
+      <h2>Please sign in</h2>
+      <p class="subtle">You must be logged in to submit a vote.</p>
+      <p><a href="{{ url_for('login') }}">Go to login</a></p>
+    {% endif %}
+  </section>
+</div>
+
+<div style="height:1.25rem"></div>
+
+<div class="card" style="grid-template-columns:1fr">
+  <section class="card-form">
+    <h2>Current results</h2>
+    {% if results %}
+      <div class="row" style="margin-top:.75rem">
+        {% for name, count in results.items() %}
+          <div class="kv"><span>{{ name }}</span> <b>{{ count }}</b></div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="subtle">No votes yet.</p>
+    {% endif %}
+    <p class="subtle" style="margin-top:1rem">
+      Admin view: <a href="{{ url_for('admin_results') }}">/admin/results</a>
+    </p>
+  </section>
+</div>
+{% endblock %}

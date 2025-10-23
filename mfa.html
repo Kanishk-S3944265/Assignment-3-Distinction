@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:640px;grid-template-columns:1fr">
+  <section class="card-form">
+    <h2>Multi-Factor Verification</h2>
+    <p class="subtle">Enter the 6-digit code from your authenticator app.</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label>Code</label>
+        <input name="code" pattern="\\d{6}" minlength="6" maxlength="6" required>
+      </div>
+      <button type="submit">Verify</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

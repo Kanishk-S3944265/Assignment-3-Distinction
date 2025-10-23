@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <section class="card-hero">
+    <div class="hero-title">Create your account</div>
+    <div class="hero-sub">Accounts use salted PBKDF2 hashes. Enable TOTP MFA after sign-in for stronger protection.</div>
+    <ul class="hero-points">
+      <li>• Passwords hashed with per-user salt</li>
+      <li>• MFA opt-in via authenticator apps</li>
+      <li>• Audit trail for all key actions</li>
+    </ul>
+  </section>
+
+  <section class="card-form">
+    <h2>Register</h2>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label>Username</label>
+        <input name="username" minlength="3" maxlength="32" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input name="password" type="password" minlength="6" maxlength="128" autocomplete="new-password" required>
+      </div>
+      <button type="submit">Create account</button>
+      <div class="subtle">Already registered? <a href="{{ url_for('login') }}">Sign in</a></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

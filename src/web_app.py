@@ -17,11 +17,11 @@ from src.voting_system import VotingSystem
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-flask-secret")
 
-# Dev-safe cookie/CSRF settings (use stricter in prod)
+# Dev-safe cookie/CSRF settings (tighten in prod)
 app.config.update(
-    SESSION_COOKIE_SECURE=False,      # allow http:// in dev
+    SESSION_COOKIE_SECURE=False,      # http in dev; set True behind TLS in prod
     SESSION_COOKIE_SAMESITE="Lax",
-    WTF_CSRF_TIME_LIMIT=None          # no timeout for demo
+    WTF_CSRF_TIME_LIMIT=None
 )
 
 # Enable CSRF globally
@@ -42,11 +42,25 @@ BASE = """<!doctype html>
   *{box-sizing:border-box}
   body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background: linear-gradient(120deg,var(--bg1),var(--bg2)); color: var(--ink); }
   .wrap { max-width: 1100px; margin: 40px auto; padding: 0 16px; }
+
+  /* Top bar */
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; color:#fff; }
+  .status { font-weight:600; opacity:.95; }
+  .logout-btn {
+    margin-left:10px; padding:6px 10px; border:0; border-radius:8px;
+    background:rgba(255,255,255,.22); color:#fff; cursor:pointer; text-decoration:none;
+  }
+  .logout-btn:hover { background:rgba(255,255,255,.34); }
+
+  /* Nav */
   nav { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
   nav a { display:inline-block; padding:8px 12px; color:#fff; background:rgba(255,255,255,.20); border-radius:10px; text-decoration:none; font-weight:600; backdrop-filter:saturate(130%) blur(2px); }
   nav a.active { background:rgba(255,255,255,.35); }
   nav a:hover { background:rgba(255,255,255,.45); }
+
   .card { background:#fff; border-radius:18px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,.15); }
+
+  /* hero */
   .hero { background: linear-gradient(90deg,#eef6ff,#f7fbff); border-radius:18px; box-shadow:0 10px 25px rgba(0,0,0,.12); overflow:hidden; }
   .hero-grid{ display:grid; grid-template-columns:1.1fr 0.9fr; gap:28px; padding:40px 32px; }
   @media (max-width: 840px){ .hero-grid{ grid-template-columns:1fr; padding:28px 20px; } }
@@ -58,15 +72,33 @@ BASE = """<!doctype html>
   .hero-card{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; width:min(420px,92%); box-shadow:0 12px 30px rgba(0,0,0,.10); }
   .hero-card h3{ margin:0 0 8px 0; font-size:1.1rem; color:#0b2a55; }
   .hero-card ul{ margin:0; padding-left:18px; color:#334155; }
+
   .msg-ok { background:#dcfce7; color:#166534; padding:10px; border-radius:8px; }
   .msg-bad { background:#fee2e2; color:#7f1d1d; padding:10px; border-radius:8px; }
   input,button { padding:8px 10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:4px; width:100%; }
   button { background:#0ea5e9; color:#fff; font-weight:600; border:0; cursor:pointer; }
   pre { background:#0b1220; color:#e2e8f0; padding:10px; border-radius:8px; overflow:auto; }
+
+  /* simple toast */
+  .toast{ position:fixed; top:16px; right:16px; background:#0ea5e9; color:#fff; padding:10px 14px; border-radius:10px; box-shadow:0 8px 20px rgba(0,0,0,.2); opacity:0; transform:translateY(-8px); transition:.25s; z-index:9999; font-weight:700; }
+  .toast.show{ opacity:1; transform:translateY(0); }
 </style>
 </head>
 <body>
 <div class='wrap'>
+
+  <div class="top">
+    <div style="font-weight:800;color:#fff;">SecureVote</div>
+    <div class="status">
+      {% if current_user %}
+        {{ current_user }} signed in
+        <a class="logout-btn" href="{{ url_for('logout') }}">Logout</a>
+      {% else %}
+        Not signed in
+      {% endif %}
+    </div>
+  </div>
+
   <nav>
     <a href='{{ url_for("home") }}' class='{% if active=="home" %}active{% endif %}'>Home</a>
     <a href='{{ url_for("register") }}' class='{% if active=="register" %}active{% endif %}'>Register</a>
@@ -79,9 +111,9 @@ BASE = """<!doctype html>
   </nav>
 
   {% with msgs = get_flashed_messages(with_categories=true) %}
-  {% for cat,m in msgs %}
-  <div class='{{ "msg-ok" if cat=="ok" else "msg-bad" }}'>{{ m|safe }}</div>
-  {% endfor %}
+    {% for cat,m in msgs %}
+      <div class='{{ "msg-ok" if cat=="ok" else "msg-bad" }}'>{{ m|safe }}</div>
+    {% endfor %}
   {% endwith %}
 
   <div class='card'>
@@ -89,6 +121,22 @@ BASE = """<!doctype html>
     {{ body|safe }}
   </div>
 </div>
+
+<script>
+window.addEventListener('DOMContentLoaded', ()=>{
+  const msgs = Array.from(document.querySelectorAll('.msg-ok')).map(e=>e.textContent.trim());
+  if (msgs.some(m => m.toLowerCase().includes('mfa enabled'))) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = 'MFA enabled';
+    document.body.appendChild(t);
+    requestAnimationFrame(()=> t.classList.add('show'));
+    setTimeout(()=> t.classList.remove('show'), 2500);
+    setTimeout(()=> t.remove(), 3000);
+  }
+});
+</script>
+
 </body></html>"""
 
 # -------------------- Helpers --------------------
@@ -134,9 +182,14 @@ def _bf_reset(username, ip):
         del _login_tracker[k]
 
 def _render(title, body, active=""):
-    # Pre-render body so {{ ... }} like CSRF get evaluated
+    # figure out current user for top-right status
+    t = request.cookies.get("jwt")
+    current_user = vs.verify_token(t) if t else None
+    # pre-render the body so Jinja in body (e.g., tokens) works
     rendered_body = render_template_string(body)
-    return render_template_string(BASE, title=title, body=rendered_body, active=active)
+    return render_template_string(
+        BASE, title=title, body=rendered_body, active=active, current_user=current_user
+    )
 
 def _get_user_and_token():
     t = request.cookies.get("jwt")
@@ -233,12 +286,12 @@ def login():
         flash(f"Account temporarily locked due to multiple failed logins. Try again in {mins} minute(s).", "bad")
         return redirect("/login")
 
-    token = vs.login(
+    token_val = vs.login(
         request.form.get("username","").strip(),
         request.form.get("password",""),
         mfa_code=(request.form.get("mfa_code") or None)
     )
-    if not token:
+    if not token_val:
         just_locked = _bf_register_failure(username, ip)
         if just_locked:
             flash("Too many failed attempts. Account locked for 10 minutes.", "bad")
@@ -247,8 +300,16 @@ def login():
         return redirect("/login")
     _bf_reset(username, ip)
     resp = make_response(redirect("/vote"))
-    resp.set_cookie("jwt", token, httponly=True, samesite="Lax")
+    resp.set_cookie("jwt", token_val, httponly=True, samesite="Lax")
     flash("Signed in successfully.","ok")
+    return resp
+
+@app.route("/logout")
+def logout():
+    resp = make_response(redirect(url_for("home")))
+    # clear the JWT cookie (session ends)
+    resp.set_cookie("jwt", "", expires=0, httponly=True, samesite="Lax")
+    flash("You have been logged out.","ok")
     return resp
 
 @app.route("/vote", methods=["GET","POST"])
@@ -295,6 +356,8 @@ def security():
                 secret = db.enable_mfa(user)
                 import pyotp; code = pyotp.TOTP(secret).now()
                 flash(f"MFA enabled. Current test code: {escape(code)}","ok")
+                # Also print to terminal for evidence
+                print(f"[SECURITY] MFA enabled for user='{user}'. Current test TOTP code: {code}")
             except Exception as e:
                 flash(f"Error: {escape(str(e))}","bad")
         elif act=="set_role":

@@ -78,7 +78,7 @@ pip install -r requirements.txt
 python -m src.web_app
 
 By default it starts on http://127.0.0.1:5000 (and your container/LAN IP).
- On restart you may see “Invalid token” in the terminal—this just means your browser still had an old JWT cookie. Use Logout or clear the cookie.
+On restart you may see “Invalid token” in the terminal, which just means your browser still had an old JWT cookie. Use Logout or clear the cookie.
 3) Typical web flow
 Home → “Start enrolment” → Register
 

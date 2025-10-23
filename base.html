@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Electronic Voting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+  <header class="nav">
+    <div class="brand">
+      <span>🗳️</span> Electronic Voting Platform
+      <span class="badge">Prototype</span>
+    </div>
+    <nav>
+      <a href="{{ url_for('results') }}">Results</a>
+      <a href="{{ url_for('vote') }}">Vote</a>
+      {% if user %}
+        <a href="{{ url_for('logout') }}">Logout ({{ user }})</a>
+      {% else %}
+        <a href="{{ url_for('login') }}">Login</a>
+        <a href="{{ url_for('register') }}">Register</a>
+      {% endif %}
+    </nav>
+  </header>
+
+  <div class="banner">
+    <strong>Disclaimer:</strong> This prototype is for coursework only. Do not interact with AEC operational systems.
+  </div>
+
+  <main class="main">
+    <div style="width:100%;max-width:920px">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat,msg in messages %}
+          <div class="flash {{cat}}">{{ msg }}</div>
+        {% endfor %}
+      {% endwith %}
+    </div>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <div>For educational demonstration only. Do not interact with AEC operational systems.</div>
+  </footer>
+</div>
+</body>
+</html>

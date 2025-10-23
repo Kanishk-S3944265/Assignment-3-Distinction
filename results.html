@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="grid-template-columns:1fr">
+  <section class="card-form">
+    <h2>Public Results</h2>
+    <p class="subtle">Aggregated totals from submitted votes.</p>
+
+    {% if results %}
+      <div class="row" style="margin-top:.75rem">
+        {% for name, count in results.items() %}
+          <div class="kv"><span>{{ name }}</span> <b>{{ count }}</b></div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="subtle">No votes yet.</p>
+    {% endif %}
+
+    <div style="margin-top:1rem">
+      {% if user %}
+        <a href="{{ url_for('vote') }}" style="text-decoration:none">
+          <button type="button">Go to voting</button>
+        </a>
+      {% else %}
+        <a href="{{ url_for('login') }}" style="text-decoration:none">
+          <button type="button">Sign in to vote</button>
+        </a>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

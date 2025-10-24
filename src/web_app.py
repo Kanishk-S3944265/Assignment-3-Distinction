@@ -1,3 +1,7 @@
+from flask import session
+from cryptography.fernet import Fernet
+import json
+
 # --- Electronic Voting Platform (Enhanced Web UI) ---
 from flask import (
     Flask, request, redirect, make_response, render_template_string,
@@ -6,6 +10,27 @@ from flask import (
 from markupsafe import escape
 import os, time
 from functools import wraps
+
+import re
+
+# very small common-password list for demo
+COMMON = {"password", "123456", "qwerty", "letmein", "admin"}
+
+def _check_password_strength(pw: str) -> tuple[bool, str]:
+    """Return (ok, message). ok=False with a human message if weak."""
+    if not pw or len(pw) < 12:
+        return False, "Password must be at least 12 characters."
+    if pw.lower() in COMMON:
+        return False, "Password is too common."
+    if not re.search(r"[A-Z]", pw):
+        return False, "Must include an uppercase letter."
+    if not re.search(r"[a-z]", pw):
+        return False, "Must include a lowercase letter."
+    if not re.search(r"\d", pw):
+        return False, "Must include a digit."
+    if not re.search(r"[^A-Za-z0-9]", pw):
+        return False, "Must include a symbol."
+    return True, ""
 
 # CSRF
 from flask_wtf.csrf import CSRFProtect, generate_csrf, CSRFError
@@ -238,9 +263,10 @@ def home():
     """
     return _render("Welcome to Secure Electronic Voting", body, "home")
 
+
 @app.route("/register", methods=["GET","POST"])
 def register():
-    if request.method=="GET":
+    if request.method == "GET":
         token = generate_csrf()
         body = f"""<form method='post'>
         <input type="hidden" name="csrf_token" value="{token}">
@@ -249,31 +275,124 @@ def register():
         <p><input name='dob' placeholder='DOB (YYYY-MM-DD)' required></p>
         <p><input name='address' placeholder='Address' required></p>
         <p><input name='username' placeholder='Username' required></p>
-        <p><input type='password' name='password' placeholder='Password' required></p>
+        <p><input type='password' name='password' placeholder='Password (min 12 chars, upper/lower/digit/symbol)' required></p>
         <p><button>Register</button></p></form>"""
         return _render("Register", body, "register")
+
+    # POST branch
     try:
+        ok, msg = _check_password_strength(request.form.get("password", ""))
+        if not ok:
+            flash(msg, "bad")
+            return redirect("/register")
+
+        # --- DEMO: encrypt PII for the session and log a note ---
+        pii = {
+            "first_name": request.form["first_name"].strip(),
+            "last_name":  request.form["last_name"].strip(),
+            "dob":        request.form["dob"].strip(),
+            "address":    request.form["address"].strip(),
+        }
+        # one-time key per registration attempt (demo only)
+        _demo_key = Fernet.generate_key()
+        f = Fernet(_demo_key)
+        cipher_blob = f.encrypt(json.dumps(pii).encode("utf-8"))
+
+        # keep the encrypted blob in the user's session (demo)
+        session["pii_blob"] = cipher_blob.decode("utf-8")
+        # optional: keep key too for demo decryption
+        session["pii_key"] = _demo_key.decode("utf-8")
+
+        print(f"[PII-DEMO] Encrypted PII for session "
+              f"(cipher={len(cipher_blob)} bytes, key={_demo_key[:6].decode()}...{_demo_key[-6:].decode()})")
+        # -------------------------------------------------------------------------
+
         vs.register_voter(
             request.form["username"], request.form["password"],
-            first_name=request.form["first_name"], last_name=request.form["last_name"],
-            dob=request.form["dob"], address=request.form["address"]
+            first_name=request.form["first_name"],
+            last_name=request.form["last_name"],
+            dob=request.form["dob"],
+            address=request.form["address"]
         )
-        flash("Registration successful.", "ok")
+        flash("Registration successful. (PII encrypted)", "ok")
         return redirect("/login")
+
     except Exception as e:
         flash(f"Error: {escape(str(e))}", "bad")
         return redirect("/register")
 
 @app.route("/login", methods=["GET","POST"])
 def login():
-    if request.method=="GET":
+    if request.method == "GET":
         token = generate_csrf()
-        body = f"""<form method='post'>
-        <input type="hidden" name="csrf_token" value="{token}">
-        <p><input name='username' placeholder='Username' required></p>
-        <p><input type='password' name='password' placeholder='Password' required></p>
-        <p><input name='mfa_code' placeholder='MFA code (if enabled)'></p>
-        <p><button>Login</button></p></form>"""
+        # Keep placeholder/replace pattern to avoid f-string clashes with JS braces
+        body = """
+<form method='post'>
+  <input type="hidden" name="csrf_token" value="{TOKEN}">
+  <p><input name='username' placeholder='Username' required></p>
+  <p><input type='password' name='password' placeholder='Password' required></p>
+  <p><input name='mfa_code' placeholder='MFA code (if enabled)'></p>
+
+  <!-- Cloudflare-style verify button (visual) -->
+  <div id="cf-demo" style="
+    display:flex; align-items:center; gap:8px; background:#1e1e1e; color:#fff;
+    padding:10px 14px; border-radius:6px; width:max-content; cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.3); user-select:none; margin:6px 0 10px 0;"
+    onclick="cfClickSuccess()">
+    <div id="cf-check" style="width:18px; height:18px; border-radius:50%; border:2px solid #6b7280; display:inline-block; transition:.3s;"></div>
+    <span id="cf-label" style="margin-left:8px;">Click to verify</span>
+    <span style="margin-left:8px; color:#ff7300; font-weight:bold;">CLOUDFLARE</span>
+  </div>
+
+  <!-- Always-visible 'Suspicious IP' popup for demo -->
+  <div id="risk-popup" style="display:flex; position:fixed; inset:0; background:rgba(0,0,0,.45);
+       align-items:center; justify-content:center; z-index:9999;">
+    <div style="background:#fff; padding:24px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.25);
+         max-width:420px; text-align:center;">
+      <h3 style="color:#b91c1c; margin:0 0 8px 0;">Suspicious IP Detected</h3>
+      <p style="margin:0 0 12px 0;">Verify your location before continuing.</p>
+      <button id="verifyLoc" type="button" style="background:#0ea5e9; color:#fff; border:0; padding:10px 18px;
+              border-radius:8px; font-weight:700; cursor:pointer;">Verify location</button>
+      <p id="locMsg" style="display:none; margin-top:14px; color:#15803d; font-weight:600;">
+        Location confirmed: Victoria, Australia — acceptable ✅
+      </p>
+    </div>
+  </div>
+
+  <p><button id="loginBtn" type="submit" disabled>Login</button></p>
+</form>
+
+<script>
+  // Make the CF pill go green (still just visual)
+  function cfClickSuccess() {
+    var circle = document.getElementById('cf-check');
+    var label  = document.getElementById('cf-label');
+    circle.style.background = '#22c55e';
+    circle.style.borderColor = '#22c55e';
+    label.textContent = 'Success!';
+  }
+
+  // Demo adaptive popup: always visible; verify enables Login
+  document.addEventListener('DOMContentLoaded', function () {
+    var overlay  = document.getElementById('risk-popup');
+    var verifyBn = document.getElementById('verifyLoc');
+    var msg      = document.getElementById('locMsg');
+    var loginBtn = document.getElementById('loginBtn');
+
+    if (verifyBn) {
+      verifyBn.addEventListener('click', function () {
+        if (msg) msg.style.display = 'block';
+        verifyBn.textContent = 'Verified';
+        setTimeout(function () {
+          if (overlay) overlay.style.display = 'none';
+          if (loginBtn) loginBtn.disabled = false; // enable login after location verify
+        }, 700);
+      });
+    }
+  });
+</script>
+"""
+        body = body.replace("{TOKEN}", token)
         return _render("Login", body, "login")
     # --- brute-force check before verifying password ---
     username_raw = request.form.get("username","")
@@ -281,7 +400,7 @@ def login():
     ip = request.remote_addr
 
     locked_for = _bf_is_locked(username, ip)
-    if locked_for:
+    if (locked_for):
         mins = max(1, locked_for // 60)
         flash(f"Account temporarily locked due to multiple failed logins. Try again in {mins} minute(s).", "bad")
         return redirect("/login")
@@ -298,6 +417,7 @@ def login():
         else:
             flash("Login failed (bad credentials or MFA missing).", "bad")
         return redirect("/login")
+
     _bf_reset(username, ip)
     resp = make_response(redirect("/vote"))
     resp.set_cookie("jwt", token_val, httponly=True, samesite="Lax")

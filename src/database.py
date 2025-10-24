@@ -1,5 +1,8 @@
 import hashlib, os, hmac, time
+from cryptography.fernet import Fernet
 from typing import Optional
+
+
 
 class Database:
     """
